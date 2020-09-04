@@ -24,6 +24,7 @@ class YouTubeObserver extends EventEmitter {
 
     playlistFetchInterval: number = 5000;
     playlistFetchTimer: NodeJS.Timeout;
+    mpdUrlFetchTimer: NodeJS.Timeout;
     audioUrlFlags: boolean[] = [];
     videoUrlFlags: boolean[] = [];
     constructor({ videoUrl, format }) {
@@ -42,7 +43,7 @@ class YouTubeObserver extends EventEmitter {
                 const response = await YouTubeService.getHeartbeat(
                     this.videoUrl
                 );
-                if (response.status === "live_stream_offline") {
+                if (response.status === "LIVE_STREAM_OFFLINE") {
                     logger.info(`直播尚未开始：${response.reason}`);
                 } else {
                     break;
@@ -93,10 +94,20 @@ class YouTubeObserver extends EventEmitter {
                 retries--;
             }
         }
+        // Fresh MPD URL every hour
+        this.mpdUrlFetchTimer = setInterval(async () => {
+            try {
+                const { mpdUrl } = await YouTubeService.getVideoInfo(
+                    this.videoUrl
+                );
+                this.mpdUrl = mpdUrl;
+            } catch (e) {}
+        }, 3600 * 1000);
     }
 
     async disconnect(): Promise<void> {
         clearInterval(this.playlistFetchTimer);
+        clearInterval(this.mpdUrlFetchTimer);
     }
 
     async cycling() {
@@ -157,7 +168,7 @@ class YouTubeObserver extends EventEmitter {
         }
         const newAudioUrls = [];
         for (const url of selectedAudioTrack.urls) {
-            const id = parseInt(url.match(/sq\/(.+)\//)[1]);
+            const id = parseInt(url.match(/\/sq\/(\d+)\//)[1]);
             if (isNaN(id)) {
                 logger.warning(`遇到了奇怪的URL 请截图给开发者：${url}`);
                 continue;
