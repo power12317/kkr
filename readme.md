@@ -2,6 +2,10 @@
 
 Yet another YouTube DVR downloader!
 
+videoplayback分支说明：
+仅针对刚结束直播，能够立即回放全程的视频，不一定能保证完整下载不报错，如果失败还请等转码完成使用其他工具。
+本分支仅个人研究，遵从个人习惯使用，不处理任何issue。
+
 ## 依赖
 
 本工具需要 ffmpeg、ffprobe 才能运行。
