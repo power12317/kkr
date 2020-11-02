@@ -1,4 +1,6 @@
 import axios from "axios";
+const qs = require("querystring");
+
 import * as ErrorMessages from "../../messages/error";
 
 export class ParseError extends Error {}
@@ -49,6 +51,16 @@ class YouTubeService {
         const isPremiumVideo =
             !!playerResponse?.videoDetails?.isLive &&
             !playerResponse?.videoDetails?.isLiveContent;
+        let videoplaybackUrl,audioplaybackUrl;
+        if(playerResponse.streamingData.adaptiveFormats[0].signatureCipher){
+            videoplaybackUrl = await YouTubeService.getPlayvideoback(playerResponse.streamingData.adaptiveFormats[0].signatureCipher);//一般0号最高画质
+            audioplaybackUrl = await YouTubeService.getPlayvideoback(playerResponse.streamingData.adaptiveFormats.slice(-1)[0].signatureCipher); //最后一个为音频
+        }else{
+            videoplaybackUrl = playerResponse.streamingData.adaptiveFormats[0].url;//一般0号最高画质
+            audioplaybackUrl = playerResponse.streamingData.adaptiveFormats.slice(-1)[0].url; //最后一个为音频
+            // videoplaybackUrl = "";
+            // audioplaybackUrl = "";
+        }
         return {
             title,
             mpdUrl,
@@ -56,6 +68,9 @@ class YouTubeService {
             latencyClass,
             isLiveDvrEnabled,
             isPremiumVideo,
+            videoId,
+            videoplaybackUrl,
+            audioplaybackUrl,
         };
     }
 
@@ -76,6 +91,45 @@ class YouTubeService {
         });
         return videoInfoResponse.data.playabilityStatus;
     }
+
+    static async getPlayvideoback(signatureCipher){
+        const str = qs.parse(signatureCipher);
+        const s = str.s;
+        const sp = str.sp;
+        const url = decodeURIComponent(str.url);
+        return `${url}&${sp}=${encodeURIComponent(Signature.rv(s))}`;
+    }
+
+    
+    
+
 }
 
+class Signature{
+    static a: any;
+    static rv(str:any){
+        this.a = str.split("");
+        this.BF(3);
+        this.UQ(41);
+        this.BF(3);
+        this.UQ(3);
+        this.BF(3);
+        this.LD();
+        return this.a.join("")
+    }
+    static UQ(b) {
+        var a=this.a;
+        var c = a[0];
+        a[0] = a[b % a.length];
+        a[b % a.length] = c
+        this.a = a;
+    }
+    static BF(b) {
+        this.a.splice(0, b)
+    }
+    static LD() {
+        this.a.reverse()
+    }
+    
+}
 export default YouTubeService;

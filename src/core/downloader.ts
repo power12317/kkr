@@ -15,6 +15,7 @@ import {
 import mergeFiles from "../utils/merge_files";
 import deleteDirectory from "../utils/delete_directory";
 import selectFormat from "../utils/select_format";
+import fix_dashurl from "../utils/fix_dashurl";
 import escapeFilename from "../utils/escape_filename";
 import logger, { ConsoleLogger } from "./services/logger";
 import { isFFmpegAvailable, isFFprobeAvailable } from "../utils/system";
@@ -59,6 +60,7 @@ class Downloader extends EventEmitter {
         threads,
     }: Partial<DownloaderOptions>) {
         super();
+        this.keepTemporaryFiles = true;
         this.videoUrl = videoUrl;
         if (format) {
             this.format = format;
@@ -68,7 +70,6 @@ class Downloader extends EventEmitter {
             this.logger.enableDebug();
         }
         if (keep) {
-            this.keepTemporaryFiles = true;
         }
         if (threads) {
             this.maxThreads = threads;
@@ -95,10 +96,13 @@ class Downloader extends EventEmitter {
             mpdUrl,
             isLowLatencyLiveStream,
             isPremiumVideo,
+            videoplaybackUrl,
+            audioplaybackUrl,
+            videoId,
         } = await YouTubeService.getVideoInfo(this.videoUrl);
         this.isLowLatencyLiveStream = isLowLatencyLiveStream;
         this.isPremiumVideo = isPremiumVideo;
-        this.outputFilename = escapeFilename(`${title}.mp4`);
+        this.outputFilename = escapeFilename(`[${videoId}]${title}.mp4`);
         this.logger.info("正在获取播放列表");
         const mpdStr = (await axios.get(mpdUrl)).data;
         const parseResult = parseMpd(mpdStr);
@@ -113,6 +117,21 @@ class Downloader extends EventEmitter {
         );
         this.videoChunkUrls = selectedVideoTrack.urls;
         this.audioChunkUrls = selectedAudioTrack.urls;
+
+        if(videoplaybackUrl && audioplaybackUrl){
+            const lastvideoChunkUrl = this.videoChunkUrls.splice(-1)[0];
+            const lastaudioChunkUrl = this.videoChunkUrls.splice(-1)[0];
+            const { fixedVideoTrack, fixedAudioTrack } = fix_dashurl(
+                {"videoplaybackUrl":videoplaybackUrl,"audioplaybackUrl":audioplaybackUrl},
+                {"lastvideoChunkUrl":lastvideoChunkUrl,"lastaudioChunkUrl":lastaudioChunkUrl}
+            );
+            this.videoChunkUrls = fixedVideoTrack;
+            this.audioChunkUrls = fixedAudioTrack;
+            console.log(this.videoChunkUrls[0]);
+            console.log(this.audioChunkUrls[0]);
+    
+        }
+        
         await download(
             this.videoChunkUrls,
             path.resolve(this.workDirectoryName, "./video_download"),

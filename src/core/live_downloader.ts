@@ -120,7 +120,7 @@ class LiveDownloader {
         this.isLowLatencyLiveStream = connectResult.isLowLatencyLiveStream;
         this.latencyClass = connectResult.latencyClass;
         this.isPremiumVideo = connectResult.isPremiumVideo;
-        this.outputFilename = escapeFilename(`${connectResult.title}`);
+        this.outputFilename = escapeFilename(`[${connectResult.videoId}]${connectResult.title}`);
         this.observer.on("new-video-chunks", (urls) => {
             this.unfinishedTasks.push(
                 ...urls.map(
