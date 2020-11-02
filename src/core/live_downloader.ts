@@ -30,6 +30,7 @@ export interface LiveDownloaderOptions {
     format?: string;
     verbose?: boolean;
     keep?: boolean;
+    threads?: number;
 }
 
 export interface OutputItem {
@@ -48,7 +49,7 @@ class LiveDownloader {
     finishedTasks: Task[] = [];
     droppedTasks: Task[] = [];
     outputFiles: OutputItem[] = [];
-    maxRunningThreads = 16;
+    maxRunningThreads = 10;
     nowRunningThreads = 0;
     stopFlag = false;
     finishFlag = false;
@@ -64,6 +65,7 @@ class LiveDownloader {
         format,
         verbose,
         keep,
+        threads,
     }: Partial<LiveDownloaderOptions>) {
         this.observer = new YouTubeObserver({
             videoUrl,
@@ -76,9 +78,13 @@ class LiveDownloader {
         if (keep) {
             this.keepTemporaryFiles = true;
         }
+        if (threads) {
+            this.maxRunningThreads = threads;
+        }
     }
 
     async start() {
+        this.logger.debug(`使用至多 ${this.maxRunningThreads} 线程下载`);
         this.isFFmpegAvailable = await isFFmpegAvailable();
         this.isFFprobeAvailable = await isFFprobeAvailable();
         if (!this.isFFmpegAvailable) {

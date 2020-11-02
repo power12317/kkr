@@ -1,8 +1,8 @@
 import { Downloader as ShuaDownloader } from 'shua';
-const download = (urls: string[], output: string, config?) => {
+const download = (urls: string[], output: string, threads: number = 10, config?) => {
     return new Promise((resolve, reject) => {
         const downloader = new ShuaDownloader({
-            threads: 16,
+            threads,
             output,
             ascending: true,
             ...config
