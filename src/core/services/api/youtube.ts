@@ -56,6 +56,7 @@ class YouTubeService {
             latencyClass,
             isLiveDvrEnabled,
             isPremiumVideo,
+            videoId,
         };
     }
 

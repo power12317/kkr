@@ -2,6 +2,8 @@
 
 Yet another YouTube DVR downloader!
 
+本fork仅针对个人使用习惯进行修改，需要使用请自行tsc编译
+
 ## 依赖
 
 本工具需要 ffmpeg、ffprobe 才能运行。
