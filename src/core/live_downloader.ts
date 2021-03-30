@@ -4,19 +4,11 @@ import * as path from "path";
 import escapeFilename from "../utils/escape_filename";
 import download from "../utils/download_file";
 import Logger, { ConsoleLogger } from "./services/logger";
-import {
-    VideoMuxer,
-    VideoTrack,
-    AudioTrack,
-    VideoSequence,
-    AudioSequence,
-} from "../utils/video_muxer";
+import { VideoMuxer, VideoTrack, AudioTrack, VideoSequence, AudioSequence } from "../utils/video_muxer";
 import deleteDirectory from "../utils/delete_directory";
 import { isFFmpegAvailable, isFFprobeAvailable } from "../utils/system";
 import mergeFiles from "../utils/merge_files";
-import analyseConcatMethod, {
-    ConcatMethod,
-} from "../utils/analyse_concat_method";
+import analyseConcatMethod, { ConcatMethod } from "../utils/analyse_concat_method";
 interface Task {
     type: "video" | "audio";
     url: string;
@@ -31,6 +23,9 @@ export interface LiveDownloaderOptions {
     verbose?: boolean;
     keep?: boolean;
     threads?: number;
+    concatMethod?: ConcatMethod;
+    forceMerge?: boolean;
+    cooldown: number;
 }
 
 export interface OutputItem {
@@ -51,6 +46,9 @@ class LiveDownloader {
     outputFiles: OutputItem[] = [];
     maxRunningThreads = 10;
     nowRunningThreads = 0;
+    concatMethod: ConcatMethod;
+    forceMerge: boolean = false;
+    cooldown: number = 0;
     stopFlag = false;
     finishFlag = false;
 
@@ -60,13 +58,10 @@ class LiveDownloader {
     latencyClass: string;
     isFFmpegAvailable: boolean;
     isFFprobeAvailable: boolean;
-    constructor({
+    constructor(
         videoUrl,
-        format,
-        verbose,
-        keep,
-        threads,
-    }: Partial<LiveDownloaderOptions>) {
+        { format, verbose, keep, threads, concatMethod, forceMerge, cooldown }: Partial<LiveDownloaderOptions>
+    ) {
         this.observer = new YouTubeObserver({
             videoUrl,
             format,
@@ -81,6 +76,16 @@ class LiveDownloader {
         if (threads) {
             this.maxRunningThreads = threads;
         }
+        if (concatMethod) {
+            this.concatMethod = concatMethod;
+        }
+        if (forceMerge) {
+            this.forceMerge = forceMerge;
+        }
+        if (cooldown) {
+            console.log(cooldown)
+            this.cooldown = cooldown;
+        }
     }
 
     async start() {
@@ -90,11 +95,12 @@ class LiveDownloader {
         if (!this.isFFmpegAvailable) {
             this.logger.warning("FFmpeg不可用 视频不会自动合并");
         }
-        if (!this.isFFprobeAvailable) {
-            this.logger.warning(
-                "FFprobe不可用 无法准确确定合并方式 临时文件将会被保留"
-            );
+        if (!this.isFFprobeAvailable && !this.concatMethod) {
+            this.logger.warning("FFprobe不可用 无法准确确定合并方式 临时文件将会被保留");
             this.keepTemporaryFiles = true;
+        }
+        if (this.concatMethod) {
+            this.logger.warning(`手动指定了合并方式${this.concatMethod} 希望你清楚这么做的效果`);
         }
         this.workDirectoryName = `kkr_download_${new Date().valueOf()}`;
         fs.mkdirSync(this.workDirectoryName);
@@ -130,10 +136,7 @@ class LiveDownloader {
                             id: u.id,
                             retry: 0,
                             type: "video",
-                            outputPath: path.resolve(
-                                this.workDirectoryName,
-                                `./video_download/${u.id}`
-                            ),
+                            outputPath: path.resolve(this.workDirectoryName, `./video_download/${u.id}`),
                         };
                     }
                 )
@@ -149,10 +152,7 @@ class LiveDownloader {
                             id: u.id,
                             retry: 0,
                             type: "audio",
-                            outputPath: path.resolve(
-                                this.workDirectoryName,
-                                `./audio_download/${u.id}`
-                            ),
+                            outputPath: path.resolve(this.workDirectoryName, `./audio_download/${u.id}`),
                         };
                     }
                 )
@@ -166,11 +166,7 @@ class LiveDownloader {
     }
 
     async checkQueue() {
-        if (
-            this.nowRunningThreads === 0 &&
-            this.unfinishedTasks.length === 0 &&
-            this.stopFlag
-        ) {
+        if (this.nowRunningThreads === 0 && this.unfinishedTasks.length === 0 && this.stopFlag) {
             if (!this.finishFlag) {
                 this.finishFlag = true;
                 this.beforeExit();
@@ -200,9 +196,7 @@ class LiveDownloader {
             if (task.retry <= 10) {
                 this.unfinishedTasks.push(task);
             } else {
-                this.logger.error(
-                    `${task.type}#${task.id} 重试次数达到上限 被放弃`
-                );
+                this.logger.error(`${task.type}#${task.id} 重试次数达到上限 被放弃`);
                 this.droppedTasks.push(task);
             }
             this.checkQueue();
@@ -216,18 +210,12 @@ class LiveDownloader {
             return;
         }
         this.finishedTasks = this.finishedTasks.sort((a, b) => a.id - b.id);
-        let finishedVideoTasks = this.finishedTasks.filter(
-            (t) => t.type === "video"
-        );
-        const finishedAudioTasks = this.finishedTasks.filter(
-            (t) => t.type === "audio"
-        );
+        let finishedVideoTasks = this.finishedTasks.filter((t) => t.type === "video");
+        const finishedAudioTasks = this.finishedTasks.filter((t) => t.type === "audio");
         if (finishedVideoTasks.length !== finishedAudioTasks.length) {
             // TODO: 处理音视频块数量不一致的情况
             this.logger.error("下载的音视频块数量不一致 请手动合并");
-            this.logger.error(
-                `临时文件位于：${path.resolve(this.workDirectoryName)}`
-            );
+            this.logger.error(`临时文件位于：${path.resolve(this.workDirectoryName)}`);
             process.exit();
         }
         // 检查视频块是否都有对应音频块 没有对应音频块的视频块将会被丢弃
@@ -247,14 +235,11 @@ class LiveDownloader {
         }
         // 遍历已下载的视频块
         // 将连续的归为一组 最终将形成大于等于一个输出组
-        const seqs: Task[][] = [];
+        let seqs: Task[][] = [];
         seqs.push([finishedVideoTasks[0]]);
         if (finishedVideoTasks.length !== 1) {
             for (let i = 1; i <= finishedVideoTasks.length - 1; i++) {
-                if (
-                    finishedVideoTasks[i].id - finishedVideoTasks[i - 1].id !==
-                    1
-                ) {
+                if (finishedVideoTasks[i].id - finishedVideoTasks[i - 1].id !== 1) {
                     seqs.push([]);
                 }
                 seqs[seqs.length - 1].push(finishedVideoTasks[i]);
@@ -262,48 +247,43 @@ class LiveDownloader {
         }
         // 当形成了大于1个输出组的时候 打印输出列表
         if (seqs.length > 1) {
-            this.logger.info("序列不连续 将输出多个文件");
-            for (let i = 0; i <= seqs.length - 1; i++) {
-                this.logger.info(
-                    `输出文件${i + 1}: #${seqs[i][0].id}-#${
-                        seqs[i][seqs[i].length - 1].id
-                    }`
-                );
+            if (this.forceMerge) {
+                seqs = [seqs.flat()];
+            } else {
+                this.logger.info("序列不连续 将输出多个文件");
+                for (let i = 0; i <= seqs.length - 1; i++) {
+                    this.logger.info(`输出文件${i + 1}: #${seqs[i][0].id}-#${seqs[i][seqs[i].length - 1].id}`);
+                }
             }
         }
         // 决定合并模式
         let useDirectConcat = true;
         let concatMethodGuessing = false;
 
-        if (!this.isFFprobeAvailable) {
-            this.logger.warning(
-                "FFprobe不可用 无法从视频信息分析合并模式 将进行自动分析 自动分析结果可能错误 临时文件将不会被删除"
-            );
-            concatMethodGuessing = true;
+        if (this.concatMethod) {
+            useDirectConcat = this.concatMethod === ConcatMethod.DIRECT_CONCAT;
+            concatMethodGuessing = false;
         } else {
-            if (seqs.flat().length === 1) {
-                // 仅有一个块 不分析直接pass
-            } else {
-                const result = await analyseConcatMethod(
-                    path.resolve(
-                        this.workDirectoryName,
-                        "./video_download",
-                        seqs.flat()[0].id.toString()
-                    ),
-                    path.resolve(
-                        this.workDirectoryName,
-                        "./video_download",
-                        seqs.flat()[1].id.toString()
-                    )
+            if (!this.isFFprobeAvailable) {
+                this.logger.warning(
+                    "FFprobe不可用 无法从视频信息分析合并模式 将进行自动分析 自动分析结果可能错误 临时文件将不会被删除"
                 );
-                if (result === ConcatMethod.FFMPEG_CONCAT) {
-                    useDirectConcat = false;
-                }
-                if (result === ConcatMethod.UNKNOWN) {
-                    this.logger.warning(
-                        `FFprobe分析视频内容失败 自动分析结果可能错误 临时文件将不会被删除`
+                concatMethodGuessing = true;
+            } else {
+                if (seqs.flat().length === 1) {
+                    // 仅有一个块 不分析直接pass
+                } else {
+                    const result = await analyseConcatMethod(
+                        path.resolve(this.workDirectoryName, "./video_download", seqs.flat()[0].id.toString()),
+                        path.resolve(this.workDirectoryName, "./video_download", seqs.flat()[1].id.toString())
                     );
-                    concatMethodGuessing = true;
+                    if (result === ConcatMethod.FFMPEG_CONCAT) {
+                        useDirectConcat = false;
+                    }
+                    if (result === ConcatMethod.UNKNOWN) {
+                        this.logger.warning(`FFprobe分析视频内容失败 自动分析结果可能错误 临时文件将不会被删除`);
+                        concatMethodGuessing = true;
+                    }
                 }
             }
         }
@@ -313,70 +293,42 @@ class LiveDownloader {
             this.logger.info(`kkr决定猜一下合并方法`);
             // 自动猜测合并方式
             if (this.isPremiumVideo) {
-                this.logger.info(
-                    `由于本视频为首播视频 kkr觉得应该使用合并模式${ConcatMethod.FFMPEG_CONCAT}`
-                );
+                this.logger.info(`由于本视频为首播视频 kkr觉得应该使用合并模式${ConcatMethod.FFMPEG_CONCAT}`);
                 useDirectConcat = false;
             } else {
                 if (!this.isLowLatencyLiveStream) {
-                    this.logger.info(
-                        `由于本视频为非低延迟视频 kkr觉得应该使用合并模式${ConcatMethod.FFMPEG_CONCAT}`
-                    );
+                    this.logger.info(`由于本视频为非低延迟视频 kkr觉得应该使用合并模式${ConcatMethod.FFMPEG_CONCAT}`);
                     useDirectConcat = false;
                 } else {
-                    this.logger.info(
-                        `kkr觉得这个视频可以使用合并模式${ConcatMethod.DIRECT_CONCAT}`
-                    );
+                    this.logger.info(`kkr觉得这个视频可以使用合并模式${ConcatMethod.DIRECT_CONCAT}`);
                 }
             }
         }
         const useSuffix = seqs.length > 1;
         for (let i = 0; i <= seqs.length - 1; i++) {
             if (useDirectConcat) {
-                const videoOutputPath = path.resolve(
-                    this.workDirectoryName,
-                    `./video_download/video_merge_${i}.mp4`
-                );
-                const audioOutputPath = path.resolve(
-                    this.workDirectoryName,
-                    `./audio_download/video_merge_${i}.mp4`
-                );
+                const videoOutputPath = path.resolve(this.workDirectoryName, `./video_download/video_merge_${i}.mp4`);
+                const audioOutputPath = path.resolve(this.workDirectoryName, `./audio_download/video_merge_${i}.mp4`);
                 this.logger.info(`为第 ${i + 1} 个输出文件合并视频`);
                 await mergeFiles(
                     Array.from(seqs[i], (t) => t.id).map(
-                        (id) =>
-                            `${path.resolve(
-                                this.workDirectoryName,
-                                "./video_download/",
-                                id.toString()
-                            )}`
+                        (id) => `${path.resolve(this.workDirectoryName, "./video_download/", id.toString())}`
                     ),
                     videoOutputPath
                 );
                 this.logger.info(`为第 ${i + 1} 个输出文件合并音频`);
                 await mergeFiles(
                     Array.from(seqs[i], (t) => t.id).map(
-                        (id) =>
-                            `${path.resolve(
-                                this.workDirectoryName,
-                                "./audio_download/",
-                                id.toString()
-                            )}`
+                        (id) => `${path.resolve(this.workDirectoryName, "./audio_download/", id.toString())}`
                     ),
                     audioOutputPath
                 );
                 this.logger.info(`混流第 ${i + 1} 个输出文件`);
                 try {
-                    const filename = await this.merge(
-                        videoOutputPath,
-                        audioOutputPath,
-                        useSuffix ? i + 1 : undefined
-                    );
+                    const filename = await this.merge(videoOutputPath, audioOutputPath, useSuffix ? i + 1 : undefined);
                     this.outputFiles.push({
                         path: filename,
-                        description: `#${seqs[i][0].id} - #${
-                            seqs[i][seqs[i].length - 1].id
-                        }`,
+                        description: `#${seqs[i][0].id} - #${seqs[i][seqs[i].length - 1].id}`,
                     });
                 } catch (e) {
                     this.logger.debug(e);
@@ -394,27 +346,13 @@ class LiveDownloader {
                 fs.writeFileSync(
                     path.resolve(this.workDirectoryName, videoListFilename),
                     Array.from(seqs[i], (t) => t.id)
-                        .map(
-                            (f) =>
-                                `file '${path.resolve(
-                                    this.workDirectoryName,
-                                    "./video_download",
-                                    f.toString()
-                                )}'`
-                        )
+                        .map((f) => `file '${path.resolve(this.workDirectoryName, "./video_download", f.toString())}'`)
                         .join("\n")
                 );
                 fs.writeFileSync(
                     path.resolve(this.workDirectoryName, audioListFilename),
                     Array.from(seqs[i], (t) => t.id)
-                        .map(
-                            (f) =>
-                                `file '${path.resolve(
-                                    this.workDirectoryName,
-                                    "./audio_download",
-                                    f.toString()
-                                )}'`
-                        )
+                        .map((f) => `file '${path.resolve(this.workDirectoryName, "./audio_download", f.toString())}'`)
                         .join("\n")
                 );
                 try {
@@ -425,9 +363,7 @@ class LiveDownloader {
                     );
                     this.outputFiles.push({
                         path: filename,
-                        description: `#${seqs[i][0].id} - #${
-                            seqs[i][seqs[i].length - 1].id
-                        }`,
+                        description: `#${seqs[i][0].id} - #${seqs[i][seqs[i].length - 1].id}`,
                     });
                 } catch (e) {
                     this.logger.debug(e);
@@ -446,12 +382,7 @@ class LiveDownloader {
         this.observer.disconnect();
         if (this.outputFiles.length > 0) {
             if (this.outputFiles.length === 1) {
-                this.logger.info(
-                    `输出文件位于：${path.resolve(
-                        ".",
-                        this.outputFiles[0].path
-                    )}`
-                );
+                this.logger.info(`输出文件位于：${path.resolve(".", this.outputFiles[0].path)}`);
             } else {
                 this.logger.info(`输出了多个文件 列表如下`);
                 for (const item of this.outputFiles) {
@@ -468,18 +399,13 @@ class LiveDownloader {
     async handleTask(task: Task) {
         return await download(task.url, task.outputPath, {
             timeout: Math.min(45000, 15000 + 15000 * task.retry),
+            cooldown: this.cooldown,
         });
     }
 
-    async merge(
-        videoPath: string,
-        audioPath: string,
-        suffix: string | number
-    ): Promise<string> {
+    async merge(videoPath: string, audioPath: string, suffix: string | number): Promise<string> {
         return new Promise((resolve, reject) => {
-            const videoMuxer = new VideoMuxer(
-                `${this.outputFilename}${suffix ? `_${suffix}` : ""}.mp4`
-            );
+            const videoMuxer = new VideoMuxer(`${this.outputFilename}${suffix ? `_${suffix}` : ""}.mp4`);
             videoMuxer.addVideoTracks(
                 new VideoTrack({
                     path: videoPath,
@@ -490,9 +416,7 @@ class LiveDownloader {
                     path: audioPath,
                 })
             );
-            videoMuxer.on("success", (outputFilename) =>
-                resolve(outputFilename)
-            );
+            videoMuxer.on("success", (outputFilename) => resolve(outputFilename));
             videoMuxer.on("fail", () => {
                 reject();
             });
@@ -506,9 +430,7 @@ class LiveDownloader {
         suffix: string | number
     ): Promise<string> {
         return new Promise((resolve, reject) => {
-            const videoMuxer = new VideoMuxer(
-                `${this.outputFilename}${suffix ? `_${suffix}` : ""}.mp4`
-            );
+            const videoMuxer = new VideoMuxer(`${this.outputFilename}${suffix ? `_${suffix}` : ""}.mp4`);
             videoMuxer.addVideoTracks(
                 new VideoSequence({
                     path: videoFileListPath,
@@ -519,9 +441,7 @@ class LiveDownloader {
                     path: audioFileListPath,
                 })
             );
-            videoMuxer.on("success", (outputFilename) =>
-                resolve(outputFilename)
-            );
+            videoMuxer.on("success", (outputFilename) => resolve(outputFilename));
             videoMuxer.on("fail", () => {
                 reject();
             });

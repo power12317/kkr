@@ -44,4 +44,31 @@ KKR 需要 Node 11+。
 
 `kkr -d "https://www.youtube.com/watch?v=BTTq175DJOY" --live`
 
-使用 `--threads <n>` 选项可以控制最大下载线程数。
+```
+KKR / 1.2.2
+
+Help:
+     Commands                      Description                   Alias
+
+     --download <url>              Download video                -d
+         <url>                     Video URL
+         --live                    Download live
+         --keep, k                 Keep temporary files
+         --threads <n>             Max download threads
+             <n>                   Number of threads
+         --concat-method           Concat method
+         --force-merge             Ignore missing chunks and merge all downloaded chunks to a single file (Live mode only)
+         --cooldown <time>         Add cooldown between chunk downloads (Live mode only)
+             <time>                Cooldown time in milliseconds
+     --help                        Show help documentation       -h
+     --version                     Show version
+
+Options:
+
+     Options                       Description
+     --verbose, debug              Debug output
+```
+
+### 手动指定合并方法
+
+可以通过`--concat-method`强制指定合并方法，该选项的可选值为`1`或`2`，其中`1`表示二进制连接分块，`2`表示使用`ffmpeg`的`concat`模式连接各分块。
