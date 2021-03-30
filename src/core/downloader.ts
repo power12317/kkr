@@ -105,6 +105,7 @@ class Downloader extends EventEmitter {
         this.isPremiumVideo = isPremiumVideo;
         this.outputFilename = escapeFilename(`[${videoId}]${title}.mp4`);
         this.logger.info("正在获取播放列表");
+
         const mpdStr = (await axios.get(mpdUrl)).data;
         const parseResult = parseMpd(mpdStr);
         // 创建工作目录
@@ -118,10 +119,9 @@ class Downloader extends EventEmitter {
         );
         this.videoChunkUrls = selectedVideoTrack.urls;
         this.audioChunkUrls = selectedAudioTrack.urls;
-
-        if(videoplaybackUrl && audioplaybackUrl){
+        if(videoplaybackUrl && audioplaybackUrl && selectedVideoTrack.urls[0].includes("/sq/")){
             const lastvideoChunkUrl = this.videoChunkUrls.splice(-1)[0];
-            const lastaudioChunkUrl = this.videoChunkUrls.splice(-1)[0];
+            const lastaudioChunkUrl = this.audioChunkUrls.splice(-1)[0];
             const { fixedVideoTrack, fixedAudioTrack } = fix_dashurl(
                 {"videoplaybackUrl":videoplaybackUrl,"audioplaybackUrl":audioplaybackUrl},
                 {"lastvideoChunkUrl":lastvideoChunkUrl,"lastaudioChunkUrl":lastaudioChunkUrl}
