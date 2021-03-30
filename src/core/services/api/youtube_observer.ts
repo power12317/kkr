@@ -41,9 +41,7 @@ class YouTubeObserver extends EventEmitter {
         while (true) {
             try {
                 logger.info(`正在获取视频信息`);
-                const response = await YouTubeService.getHeartbeat(
-                    this.videoUrl
-                );
+                const response = await YouTubeService.getHeartbeat(this.videoUrl);
                 if (response.status === "LIVE_STREAM_OFFLINE") {
                     logger.info(`直播尚未开始：${response.reason}`);
                 } else {
@@ -89,11 +87,7 @@ class YouTubeObserver extends EventEmitter {
                 };
             } catch (e) {
                 logger.debug(e);
-                logger.warning(
-                    `获取视频信息失败${
-                        retries < 3 ? ` 第 ${3 - retries} 次重试` : ""
-                    }`
-                );
+                logger.warning(`获取视频信息失败${retries < 3 ? ` 第 ${3 - retries} 次重试` : ""}`);
                 retries--;
             }
         }
@@ -118,9 +112,7 @@ class YouTubeObserver extends EventEmitter {
         // Fresh MPD URL every hour
         this.mpdUrlFetchTimer = setInterval(async () => {
             try {
-                const { mpdUrl } = await YouTubeService.getVideoInfo(
-                    this.videoUrl
-                );
+                const { mpdUrl } = await YouTubeService.getVideoInfo(this.videoUrl);
                 this.mpdUrl = mpdUrl;
             } catch (e) {}
         }, 3600 * 1000);
@@ -130,27 +122,19 @@ class YouTubeObserver extends EventEmitter {
     }
 
     async getVideoChunks() {
-        let parseResult: ParseResult;
-        try {
-            const CancelToken = axios.CancelToken;
-            const source = CancelToken.source();
-            const timer = setTimeout(() => {
-                source.cancel("Timeout");
-            }, 8000);
-            const mpdStr = (
-                await axios.get(this.mpdUrl, {
-                    cancelToken: source.token,
-                })
-            ).data;
-            clearTimeout(timer);
-            parseResult = parseMpd(mpdStr);
-        } catch (e) {
-            throw new NetworkError("获取MPD列表失败");
-        }
-        const { selectedVideoTrack, selectedAudioTrack } = selectFormat(
-            this.format,
-            parseResult
-        );
+        const CancelToken = axios.CancelToken;
+        const source = CancelToken.source();
+        const timer = setTimeout(() => {
+            source.cancel("Timeout");
+        }, 8000);
+        const mpdStr = (
+            await axios.get(this.mpdUrl, {
+                cancelToken: source.token,
+            })
+        ).data;
+        clearTimeout(timer);
+        const parseResult = parseMpd(mpdStr);
+        const { selectedVideoTrack, selectedAudioTrack } = selectFormat(this.format, parseResult);
         const newVideoUrls = [];
         for (const url of selectedVideoTrack.urls) {
             const id = parseInt(url.match(/\/sq\/(\d+)\//)[1]);
